@@ -1,0 +1,36 @@
+## Interface: 30300
+## Title: AuctionMaster |cFF00CCFFv0.1.0|r
+## Notes: The most comprehensive Auction House addon.
+## Author: Manus
+## Version: 0.1.0
+## SavedVariables: AuctionMasterDB
+
+# Libraries
+Libs\LibStub\LibStub.lua
+Libs\LibCompress\LibCompress.lua
+Libs\LibDataBroker-1.1\LibDataBroker-1.1.lua
+Libs\LibExtraTip\LibExtraTip.lua
+Libs\LibParse\LibParse.lua
+
+# Core Files
+Core\Constants.lua
+Core\Localization.lua
+Core\Utilities.lua
+Core\Database.lua
+Core\Events.lua
+Core\API.lua
+Core\Init.lua
+
+# Modules
+Modules\Scanner.lua
+Modules\Tooltip.lua
+Modules\Pricing.lua
+Modules\Analytics.lua
+Modules\Shopping.lua
+Modules\Posting.lua
+
+# UI Files
+UI\Settings.lua
+
+# Main File
+AuctionMaster.lua

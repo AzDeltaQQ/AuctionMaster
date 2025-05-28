@@ -32,6 +32,24 @@ function AM:InitializeModules()
         self:LoadTooltipModule()
     end
     
+    -- Initialize Settings
+    if self.Settings and self.Settings.Initialize then -- Check if Settings module and its Initialize function exist
+        self.Settings:Initialize()
+        AM.Util.Debug(AM.Constants.DEBUG_LEVEL.INFO, "Settings module initialized via Core/Init.lua")
+    end
+    
+    -- Initialize Sniper
+    if self.Sniper and self.Sniper.Initialize then -- Check if Sniper module and its Initialize function exist
+        self.Sniper:Initialize()
+        AM.Util.Debug(AM.Constants.DEBUG_LEVEL.INFO, "Sniper module initialized via Core/Init.lua")
+    end
+    
+    -- Initialize MainFrame UI
+    if self.UI and self.UI.MainFrame and self.UI.MainFrame.Initialize then
+        self.UI.MainFrame:Initialize()
+        AM.Util.Debug(AM.Constants.DEBUG_LEVEL.INFO, "AuctionMaster MainFrame module initialized via Core/Init.lua")
+    end
+    
     -- Initialize other modules as needed
 end
 
@@ -96,21 +114,17 @@ function AM:SetupMinimapButton()
         icon = "Interface\\AddOns\\AuctionMaster\\Media\\icon",
         OnClick = function(_, button)
             if button == "LeftButton" then
-                -- Toggle main frame if auction house is open
-                if AuctionFrame and AuctionFrame:IsVisible() then
-                    if self.UI and self.UI.MainFrame then
-                        self.UI.MainFrame:Toggle()
-                    end
+                -- Toggle main frame
+                if AM.UI and AM.UI.MainFrame then
+                    AM.UI.MainFrame:Toggle()
                 else
-                    -- Show settings if auction house is closed
-                    if self.Settings then
-                        self.Settings:Show()
-                    end
+                    -- Fallback or error if MainFrame isn't available
+                    AM.Util.Debug(AM.Constants.DEBUG_LEVEL.ERROR, "MainFrame not available to toggle.")
                 end
             elseif button == "RightButton" then
                 -- Show settings
-                if self.Settings then
-                    self.Settings:Show()
+                if AM.Settings then
+                    AM.Settings:Show()
                 end
             end
         end,

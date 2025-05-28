@@ -27,10 +27,12 @@ Modules\Tooltip.lua
 Modules\Pricing.lua
 Modules\Analytics.lua
 Modules\Shopping.lua
+Modules\Sniper.lua
 Modules\Posting.lua
 
 # UI Files
 UI\Settings.lua
+UI\MainFrame.lua
 
 # Main File
 AuctionMaster.lua

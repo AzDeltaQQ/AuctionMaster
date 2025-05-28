@@ -11,11 +11,11 @@ local scanInProgress = false
 local scanType = nil
 local scanStartTime = 0
 local scanResults = {}
-local currentQuery = {}
-local currentPage = 0
-local totalPages = 0
+local currentQuery = {} -- Holds the parameters for the current auction query
+local currentPage = 0   -- 0-indexed internally for API calls
+local totalPages = 0    -- Total pages for the current scan, determined after first query
 local scanThrottle = 100 -- ms between queries, will be loaded from settings
-local lastScanTime = 0
+local lastScanTime = 0  -- Timestamp of the last query sent
 local searchCache = {}
 
 -- Initialize the scanner module
@@ -30,7 +30,7 @@ function Scanner:Initialize()
     AM.Util.Debug(AM.Constants.DEBUG_LEVEL.INFO, "Scanner module initialized")
 end
 
--- Start a full auction house scan
+-- Start a full auction house scan or a targeted search
 function Scanner:StartScan(scanParams)
     -- Check if auction house is open
     if not AuctionFrame or not AuctionFrame:IsVisible() then
@@ -50,21 +50,28 @@ function Scanner:StartScan(scanParams)
     
     -- Reset scan data
     scanResults = {}
-    currentPage = 0
-    totalPages = 0
+    currentPage = 0 -- Start at page 0 for the first query
+    totalPages = 0  -- Will be determined after the first query's results
     scanStartTime = GetTime()
     scanInProgress = true
+    
+    -- Store search term if it's a targeted scan
+    if scanType == AM.Constants.SCAN_TYPE_TARGETED and scanParams.searchTerm then
+        currentQuery.searchTerm = scanParams.searchTerm -- Store for QueryCurrentPage
+    else
+        currentQuery.searchTerm = nil -- Clear for other scan types
+    end
     
     -- Fire scan start event
     AM.Events:FireEvent(AM.Constants.EVENTS.SCAN_START, scanType)
     
-    -- Start the scan
-    self:ScanNextPage()
+    AM.Util.Debug(AM.Constants.DEBUG_LEVEL.INFO, "Scan started. Type: " .. scanType .. ". Querying page 0.")
+    self:QueryCurrentPage() -- Start by querying the first page (page 0)
     
     return true
 end
 
--- Search for specific items
+-- Search for specific items (convenience wrapper for StartScan)
 function Scanner:Search(searchTerm, exact)
     -- Check if auction house is open
     if not AuctionFrame or not AuctionFrame:IsVisible() then
@@ -82,7 +89,7 @@ function Scanner:Search(searchTerm, exact)
     local searchParams = {
         type = AM.Constants.SCAN_TYPE_TARGETED,
         searchTerm = searchTerm,
-        exact = exact or false
+        exact = exact or false -- 'exact' might be used in query setup later if needed
     }
     
     -- Check search cache for recent results
@@ -90,138 +97,124 @@ function Scanner:Search(searchTerm, exact)
     if searchCache[cacheKey] and (GetTime() - searchCache[cacheKey].time < 60) then
         -- Use cached results if less than 60 seconds old
         AM.Util.Debug(AM.Constants.DEBUG_LEVEL.INFO, "Using cached search results for: " .. searchTerm)
-        return searchCache[cacheKey].results
+        -- This part needs adjustment: cached results should be displayed, not re-scanned.
+        -- For now, we'll proceed with a new scan as per existing logic, cache update is in EndScan.
+        -- To actually use cache and skip scan:
+        -- AM.Events:FireEvent(AM.Constants.EVENTS.SCAN_COMPLETE, searchCache[cacheKey].results, #searchCache[cacheKey].results, 0)
+        -- print("|cFF00CCFF" .. L:Get("SCAN_COMPLETE_CACHED", #searchCache[cacheKey].results) .. "|r")
+        -- return true 
     end
     
     -- Start the search scan
     return self:StartScan(searchParams)
 end
 
--- Scan the next page of auction results
-function Scanner:ScanNextPage()
+-- Prepare and execute the query for the current page
+function Scanner:QueryCurrentPage()
+    if not scanInProgress then return end
+
     -- Check if auction house is still open
     if not AuctionFrame or not AuctionFrame:IsVisible() then
         self:EndScan("ERROR_AH_CLOSED")
         return
     end
-    
-    -- Increment page counter
-    currentPage = currentPage + 1
-    
+
     -- Prepare query based on scan type
     if scanType == AM.Constants.SCAN_TYPE_FULL then
-        -- Full scan - query all items
         currentQuery = {
-            name = "",
-            minLevel = 0,
-            maxLevel = 0,
-            invTypeIndex = 0,
-            classIndex = 0,
-            subclassIndex = 0,
-            page = currentPage - 1,
-            isUsable = false,
-            qualityIndex = 0,
+            name = "", minLevel = 0, maxLevel = 0, invTypeIndex = 0,
+            classIndex = 0, subclassIndex = 0, page = currentPage,
+            isUsable = false, qualityIndex = 0,
             getAll = AM.DB:GetSetting("scanning.getAll", false)
         }
     elseif scanType == AM.Constants.SCAN_TYPE_TARGETED then
-        -- Targeted scan - search for specific items
         currentQuery = {
-            name = currentQuery.searchTerm or "",
-            minLevel = 0,
-            maxLevel = 0,
-            invTypeIndex = 0,
-            classIndex = 0,
-            subclassIndex = 0,
-            page = currentPage - 1,
-            isUsable = false,
-            qualityIndex = 0,
-            getAll = false
+            name = currentQuery.searchTerm or "", minLevel = 0, maxLevel = 0, invTypeIndex = 0,
+            classIndex = 0, subclassIndex = 0, page = currentPage,
+            isUsable = false, qualityIndex = 0, getAll = false
         }
     elseif scanType == AM.Constants.SCAN_TYPE_SNIPER then
-        -- Sniper scan - look for newly posted items
-        currentQuery = {
-            name = "",
-            minLevel = 0,
-            maxLevel = 0,
-            invTypeIndex = 0,
-            classIndex = 0,
-            subclassIndex = 0,
-            page = 0,
-            isUsable = false,
-            qualityIndex = 0,
-            getAll = false
+         currentQuery = { -- Sniper always queries page 0 for latest items
+            name = "", minLevel = 0, maxLevel = 0, invTypeIndex = 0,
+            classIndex = 0, subclassIndex = 0, page = 0, -- Sniper specific
+            isUsable = false, qualityIndex = 0, getAll = false
         }
+        if scanType == AM.Constants.SCAN_TYPE_SNIPER then
+             AM.Util.Debug(AM.Constants.DEBUG_LEVEL.INFO, "Sniper scan querying page 0.")
+        end
     end
     
-    -- Update progress
+    -- Update progress (totalPages might be 0 on the first call)
     local progress = 0
     if totalPages > 0 then
-        progress = math.floor((currentPage / totalPages) * 100)
+        -- currentPage is 0-indexed, so add 1 for display
+        progress = math.floor(((currentPage + 1) / totalPages) * 100) 
     end
-    AM.Events:FireEvent(AM.Constants.EVENTS.SCAN_PROGRESS, progress, currentPage, totalPages)
+    AM.Events:FireEvent(AM.Constants.EVENTS.SCAN_PROGRESS, progress, currentPage + 1, totalPages)
     
     -- Execute the query with throttling
     local timeSinceLastScan = GetTime() - lastScanTime
     if timeSinceLastScan < (scanThrottle / 1000) then
-        -- Wait before sending next query
         C_Timer.After((scanThrottle / 1000) - timeSinceLastScan, function()
-            self:ExecuteQuery()
+            if scanInProgress then -- Re-check scanInProgress in case it was cancelled during the timer
+                QueryAuctionItems(
+                    currentQuery.name, currentQuery.minLevel, currentQuery.maxLevel,
+                    currentQuery.invTypeIndex, currentQuery.classIndex, currentQuery.subclassIndex,
+                    currentQuery.page, currentQuery.isUsable, currentQuery.qualityIndex,
+                    currentQuery.getAll
+                )
+                lastScanTime = GetTime()
+                AM.Util.Debug(AM.Constants.DEBUG_LEVEL.INFO, "Querying page " .. currentQuery.page .. " (Throttled)")
+            end
         end)
     else
-        -- Execute immediately
-        self:ExecuteQuery()
+        QueryAuctionItems(
+            currentQuery.name, currentQuery.minLevel, currentQuery.maxLevel,
+            currentQuery.invTypeIndex, currentQuery.classIndex, currentQuery.subclassIndex,
+            currentQuery.page, currentQuery.isUsable, currentQuery.qualityIndex,
+            currentQuery.getAll
+        )
+        lastScanTime = GetTime()
+        AM.Util.Debug(AM.Constants.DEBUG_LEVEL.INFO, "Querying page " .. currentQuery.page .. " (Immediate)")
     end
 end
 
--- Execute the current query
-function Scanner:ExecuteQuery()
-    -- Record query time
-    lastScanTime = GetTime()
-    
-    -- Send the query to the auction house
-    QueryAuctionItems(
-        currentQuery.name,
-        currentQuery.minLevel,
-        currentQuery.maxLevel,
-        currentQuery.invTypeIndex,
-        currentQuery.classIndex,
-        currentQuery.subclassIndex,
-        currentQuery.page,
-        currentQuery.isUsable,
-        currentQuery.qualityIndex,
-        currentQuery.getAll
-    )
-    
-    AM.Util.Debug(AM.Constants.DEBUG_LEVEL.INFO, "Querying page " .. (currentQuery.page + 1))
-end
-
--- Handle auction data updates
+-- Handle auction data updates (AUCTION_ITEM_LIST_UPDATE event)
 function Scanner:OnAuctionUpdate()
-    -- Ignore if no scan in progress
     if not scanInProgress then return end
     
-    -- Process the current page of results
-    self:ProcessCurrentPage()
+    self:ProcessCurrentPage() -- Process results for the page that was just queried (currentPage)
     
-    -- Check if we need to scan more pages
-    if currentPage == 1 then
-        -- First page - determine total pages
-        local numBatchAuctions, totalAuctions = GetNumAuctionItems("list")
-        totalPages = math.ceil(totalAuctions / numBatchAuctions)
-        
-        if totalPages == 0 then
-            totalPages = 1 -- At least one page even if empty
+    local numBatchAuctions, totalAuctions = GetNumAuctionItems("list")
+    
+    -- Determine total pages on the first page of results for non-sniper scans
+    if currentPage == 0 and scanType ~= AM.Constants.SCAN_TYPE_SNIPER then
+        if totalAuctions == 0 then
+            totalPages = 1 -- No items, scan is effectively done after this one page result
+        else
+            if numBatchAuctions > 0 then
+                totalPages = math.ceil(totalAuctions / numBatchAuctions)
+            else
+                -- This case (numBatchAuctions is 0 but totalAuctions > 0) should ideally not happen.
+                -- If it does, it implies an issue with AH data. Treat as one page to prevent errors.
+                totalPages = 1 
+                AM.Util.Debug(AM.Constants.DEBUG_LEVEL.WARNING, "Warning: numBatchAuctions is 0 but totalAuctions > 0. Setting totalPages to 1.")
+            end
         end
-        
-        AM.Util.Debug(AM.Constants.DEBUG_LEVEL.INFO, "Found " .. totalAuctions .. " auctions across " .. totalPages .. " pages")
+        AM.Util.Debug(AM.Constants.DEBUG_LEVEL.INFO, "Scan update. Total items: " .. totalAuctions .. ". Total pages calculated: " .. totalPages)
+    elseif scanType == AM.Constants.SCAN_TYPE_SNIPER then
+        totalPages = 1 -- Sniper scan is always considered a single page (the most recent items)
     end
-    
-    -- Continue scanning or finish
-    if currentPage < totalPages then
-        -- Scan next page
-        self:ScanNextPage()
+
+    -- Check if scan should continue
+    -- currentPage is 0-indexed. If totalPages is 5, the last page index is 4.
+    -- So, continue if currentPage < (totalPages - 1)
+    if currentPage < totalPages - 1 then 
+        currentPage = currentPage + 1
+        AM.Util.Debug(AM.Constants.DEBUG_LEVEL.INFO, "Proceeding to next page: " .. currentPage .. " of " .. totalPages -1 .. " (0-indexed)")
+        self:QueryCurrentPage()
     else
-        -- Scan complete
+        AM.Util.Debug(AM.Constants.DEBUG_LEVEL.INFO, "All pages scanned or single page scan complete. Current page: " .. currentPage .. ", Total pages: " .. totalPages)
         self:EndScan()
     end
 end
